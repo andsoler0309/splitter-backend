@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: splitter-music-backend
+    env: docker
+    dockerfilePath: ./Dockerfile
+    startCommand: ./start_production.sh
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: OUTPUT_DIR
+        value: /app/outputs
+      - key: TEMP_DIR
+        value: /app/temp
+      - key: MAX_DURATION
+        value: "600"
+      - key: DEMUCS_MODEL
+        value: htdemucs
+      - key: API_HOST
+        value: 0.0.0.0
+      - key: API_PORT
+        value: "8000"
+      # These should be set as secret environment variables in Render dashboard:
+      # - UPSTASH_REDIS_REST_URL
+      # - UPSTASH_REDIS_REST_TOKEN
+      # - FRONTEND_URL
+    healthCheckPath: /
+    plan: starter # Change to a paid plan for production

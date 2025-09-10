@@ -1,0 +1,80 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - OUTPUT_DIR=/app/outputs
+      - TEMP_DIR=/app/temp
+      - DEMUCS_MODEL=htdemucs
+      - MAX_DURATION=600
+      - PYTHONHTTPSVERIFY=0
+      - SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+      - REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+      - TORCHAUDIO_BACKEND=soundfile
+      - OMP_NUM_THREADS=1
+    volumes:
+      - ./outputs:/app/outputs
+      - ./temp:/app/temp
+    depends_on:
+      - redis
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  worker:
+    build: .
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - OUTPUT_DIR=/app/outputs
+      - TEMP_DIR=/app/temp
+      - DEMUCS_MODEL=htdemucs
+      - MAX_DURATION=600
+      - PYTHONHTTPSVERIFY=0
+      - SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+      - REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+      - TORCHAUDIO_BACKEND=soundfile
+      - OMP_NUM_THREADS=1
+      - PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:128
+    volumes:
+      - ./outputs:/app/outputs
+      - ./temp:/app/temp
+    depends_on:
+      - redis
+    command: celery -A worker.celery_app worker --loglevel=info
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 12G
+        reservations:
+          memory: 4G
+    healthcheck:
+      test: ["CMD", "celery", "-A", "worker.celery_app", "inspect", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  redis_data:
