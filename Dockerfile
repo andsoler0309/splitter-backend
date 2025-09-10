@@ -22,7 +22,10 @@ RUN apt-get update && apt-get install -y \
 # Copy requirements first for better caching
 COPY requirements.txt .
 
-# Install Python dependencies
+# Upgrade pip first
+RUN pip install --upgrade pip
+
+# Install Python dependencies with better dependency resolution
 RUN pip install --no-cache-dir "numpy<2.0.0" && \
     pip install --no-cache-dir -r requirements.txt
 
