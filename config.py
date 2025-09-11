@@ -25,7 +25,9 @@ class Settings(BaseSettings):
     # Memory optimization settings
     CHUNK_DURATION: int = int(os.getenv("CHUNK_DURATION", "15"))  # seconds
     MEMORY_LIMIT_MB: int = int(os.getenv("MEMORY_LIMIT_MB", "450"))  # Leave 62MB buffer for 512MB limit
-    
+    CHUNK_TIMEOUT: int = int(os.getenv("CHUNK_TIMEOUT", "600"))  # 10 minutes for chunks
+    FULL_TIMEOUT: int = int(os.getenv("FULL_TIMEOUT", "1800"))  # 30 minutes for full files
+
     # YouTube Download Configuration
     MAX_DURATION: int = int(os.getenv("MAX_DURATION", "600"))  # 10 minutes max
     

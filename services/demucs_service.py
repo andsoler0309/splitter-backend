@@ -161,15 +161,15 @@ class DemucsService:
             cmd.append(audio_file)
             logger.info(f"Running Demucs command: {' '.join(cmd)}")
             
-            # Run the command with reduced timeout for chunks
-            timeout_seconds = 180 if len(audio_file.split('/')) > 0 and 'chunk_' in audio_file else 600
+            # Run the command with configurable timeout
+            timeout_seconds = settings.CHUNK_TIMEOUT if 'chunk_' in audio_file else settings.FULL_TIMEOUT
             
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
                 check=True,
-                timeout=timeout_seconds,  # 5 minutes for chunks, 30 for full files
+                timeout=timeout_seconds,  # Configurable timeouts from settings
                 env=env
             )
             

@@ -30,9 +30,9 @@ class JobManager:
                 import time
                 current_time = time.time()
                 job_time = existing_job.updated_at.timestamp() if existing_job.updated_at else current_time
-                
-                # If job has been stuck for more than 20 minutes, reset it
-                if current_time - job_time > 1200:  # 20 minutes
+
+                # If job has been stuck for more than 30 minutes, reset it
+                if current_time - job_time > 1800:  # 30 minutes
                     logger.warning(f"Job {existing_job.job_id} stuck in {existing_job.status} for too long, resetting")
                     existing_job = self.reset_job_status(existing_job.job_id)
                 elif existing_job.status in [JobStatus.PENDING]:
