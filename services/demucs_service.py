@@ -1,5 +1,5 @@
 """
-Demucs audio separation service
+Demucs audio separation service optimized for 512MB memory environments
 """
 import logging
 import os
@@ -7,6 +7,7 @@ import asyncio
 import subprocess
 from typing import Dict
 import glob
+import gc
 from config import settings
 
 # Configure audio backend for torchaudio
@@ -15,6 +16,16 @@ try:
     torchaudio.set_audio_backend("soundfile")
 except Exception as e:
     logging.warning(f"Could not set torchaudio backend: {e}")
+
+# Memory optimization for low-memory environments
+try:
+    import torch
+    # Set memory fraction to be more conservative
+    torch.set_num_threads(1)
+    if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        torch.mps.set_per_process_memory_fraction(0.7)
+except Exception as e:
+    logging.warning(f"Could not optimize torch memory settings: {e}")
 
 logger = logging.getLogger(__name__)
 
@@ -58,11 +69,11 @@ class DemucsService:
             audio_duration = self._get_audio_duration(audio_file)
             logger.info(f"Audio duration: {audio_duration} seconds")
             
-            # If audio is longer than 45 seconds, split it into chunks
-            # Use 45s threshold to avoid chunking very short files
-            max_chunk_duration = 30  # 30 seconds - much faster processing
+            # If audio is longer than 30 seconds, split it into chunks
+            # Use configurable chunk duration for memory-constrained environments
+            max_chunk_duration = settings.CHUNK_DURATION  # From config (default: 15s for 512MB)
             
-            if audio_duration > 45:  # Only chunk if longer than 45 seconds
+            if audio_duration > 30:  # Chunk if longer than 30 seconds
                 logger.info(f"Audio is {audio_duration}s, splitting into chunks for processing")
                 separated_files = await self._process_audio_in_chunks(
                     audio_file, demucs_output_dir, requested_stems, max_chunk_duration
@@ -103,12 +114,14 @@ class DemucsService:
             env = os.environ.copy()
             env['TORCHAUDIO_BACKEND'] = 'soundfile'
             env['OMP_NUM_THREADS'] = '1'
-            # Reduce memory usage for PyTorch
-            env['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:128'
+            # Aggressive memory reduction for 512MB environments
+            env['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:32'
             env['MALLOC_TRIM_THRESHOLD_'] = '0'
-            # Limit PyTorch memory usage
+            # Limit PyTorch memory usage more aggressively
             env['PYTORCH_MPS_HIGH_WATERMARK_RATIO'] = '0.0'
             env['TORCH_HOME'] = '/tmp/torch_cache'
+            # Force garbage collection
+            env['PYTHONUNBUFFERED'] = '1'
             
             # Ensure model cache directory exists to prevent re-downloads
             model_cache_dir = os.path.expanduser("~/.cache/torch/hub/facebookresearch_demucs_main")
@@ -130,11 +143,12 @@ class DemucsService:
             # Build command based on requested stems
             cmd = ["demucs", "-n", self.model, "-o", output_dir, "--device", "cpu"]
             
-            # Add memory optimization flags
+            # Add aggressive memory optimization flags for 512MB limit
             cmd.extend([
                 "--shifts", "1",      # Reduce shifts for lower memory usage
-                "--overlap", "0.25",  # Reduce overlap for lower memory
-                "--jobs", "1"         # Single job to limit memory usage
+                "--overlap", "0.1",   # Minimal overlap for lowest memory usage
+                "--jobs", "1",        # Single job to limit memory usage
+                "--segment", "7"      # Process in 8-second segments for minimal memory
             ])
             
             # Use --two-stems if only one stem is requested (more efficient)
@@ -148,7 +162,7 @@ class DemucsService:
             logger.info(f"Running Demucs command: {' '.join(cmd)}")
             
             # Run the command with reduced timeout for chunks
-            timeout_seconds = 300 if len(audio_file.split('/')) > 0 and 'chunk_' in audio_file else 1800
+            timeout_seconds = 180 if len(audio_file.split('/')) > 0 and 'chunk_' in audio_file else 600
             
             result = subprocess.run(
                 cmd,
@@ -272,7 +286,7 @@ class DemucsService:
             return 180.0
     
     async def _process_audio_in_chunks(self, audio_file: str, output_dir: str, 
-                                     requested_stems: list, chunk_duration: int = 30) -> Dict[str, str]:
+                                     requested_stems: list, chunk_duration: int = None) -> Dict[str, str]:
         """
         Process audio in chunks and then merge the results
         
@@ -280,13 +294,16 @@ class DemucsService:
             audio_file: Input audio file
             output_dir: Output directory
             requested_stems: List of stems to separate
-            chunk_duration: Duration of each chunk in seconds (default: 30s)
+            chunk_duration: Duration of each chunk in seconds (uses config default if None)
             
         Returns:
             Dictionary mapping stem names to merged file paths
         """
+        if chunk_duration is None:
+            chunk_duration = settings.CHUNK_DURATION
+            
         logger.info(f"Processing audio in chunks of {chunk_duration} seconds")
-        logger.info("Using optimized 30-second chunks for faster processing and lower memory usage")
+        logger.info(f"Using optimized {chunk_duration}s chunks for {settings.MEMORY_LIMIT_MB}MB memory limit")
         
         # Create temporary directory for chunks
         chunks_dir = os.path.join(output_dir, "chunks")
@@ -342,9 +359,21 @@ class DemucsService:
                 )
                 chunk_results.append(chunk_separated)
                 
-                # Force cleanup after each chunk to free memory
-                import gc
+                # Force aggressive cleanup after each chunk to free memory
+                import psutil
+                
                 gc.collect()
+                
+                # Log memory usage for debugging
+                process = psutil.Process(os.getpid())
+                memory_mb = process.memory_info().rss / 1024 / 1024
+                logger.info(f"Memory usage after chunk {i+1}: {memory_mb:.1f} MB")
+                
+                # If memory usage is getting too high, force more aggressive cleanup
+                if memory_mb > settings.MEMORY_LIMIT_MB:  # Alert if approaching limit
+                    logger.warning(f"High memory usage detected: {memory_mb:.1f} MB (limit: {settings.MEMORY_LIMIT_MB} MB)")
+                    gc.collect()
+                    gc.collect()  # Call twice for more thorough cleanup
                 
             except Exception as e:
                 logger.error(f"Failed to process chunk {i+1}: {e}")

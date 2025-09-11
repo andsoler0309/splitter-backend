@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     # Demucs Configuration
     DEMUCS_MODEL: str = os.getenv("DEMUCS_MODEL", "htdemucs")
     
+    # Memory optimization settings
+    CHUNK_DURATION: int = int(os.getenv("CHUNK_DURATION", "15"))  # seconds
+    MEMORY_LIMIT_MB: int = int(os.getenv("MEMORY_LIMIT_MB", "450"))  # Leave 62MB buffer for 512MB limit
+    
     # YouTube Download Configuration
     MAX_DURATION: int = int(os.getenv("MAX_DURATION", "600"))  # 10 minutes max
     
